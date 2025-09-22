@@ -40,12 +40,11 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Redis Service
+  # Redis Service (internal only)
   redis:
     image: redis:7-alpine
     container_name: callcenter-redis
-    ports:
-      - "6379:6379"
+    # Removed ports mapping to avoid host conflict
     volumes:
       - redis_data:/data
     restart: unless-stopped
