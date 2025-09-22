@@ -1075,7 +1075,7 @@ async def handle_recording_status(
     if RecordingStatus == "completed" and RecordingUrl:
         audio_url = f"{RecordingUrl}.mp3"
         background_tasks.add_task(transcribe_and_store, CallSid, audio_url)
-        # background_tasks.add_task(call_lead_generation_api, CallSid)
+        background_tasks.add_task(call_lead_generation_api, CallSid)
 
     return {"status": "ok"}
 

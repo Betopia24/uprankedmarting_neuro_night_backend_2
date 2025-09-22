@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 import httpx
 import hmac
 import hashlib
@@ -9,6 +9,7 @@ import os
 import json
 import requests
 import io
+import logging
 
 from app.core.config import settings
 from app.api.models.ai_agent_model import AICallLog, CallStatus, CallType
@@ -25,7 +26,7 @@ ELEVENLABS_BASE_URL = "https://api.elevenlabs.io"
 # Tolerance in seconds for how old timestamp can be (to prevent replay)
 TIMESTAMP_TOLERANCE = 30 * 60  # e.g. 30 minutes
 
-
+logger = logging.getLogger(__name__)
 
 # -------------------------------------------------
 # 1️⃣ INITIATION WEBHOOK – store initial call info
@@ -82,7 +83,7 @@ async def initiation_webhook(request: Request):
 # 2️⃣ POST–CALL WEBHOOK – update record
 # -------------------------------------------------
 @router.post("/elevenlabs-call-log")
-async def handle_post_call_transcription(request: Request):
+async def handle_post_call_transcription(request: Request, background_tasks: BackgroundTasks):
     """
     Post–call webhook from ElevenLabs.
     1. Verify signature
@@ -202,6 +203,8 @@ async def handle_post_call_transcription(request: Request):
     })
 
     print("✅ ElevenLabs post-call update:", call_log.id)
+    background_tasks.add_task(call_lead_generation_api, twilio_sid or call_log.call_sid)
+
     return {
         "status": "updated",
         "conversation_id": conversation_id,
@@ -223,6 +226,32 @@ def get_conversation_audio(conversation_id: str):
     return StreamingResponse(audio_bytes, media_type="audio/mpeg", headers={
         "Content-Disposition": f"attachment; filename={conversation_id}.mp3"
     })
+
+async def call_lead_generation_api(call_sid: str):
+    """
+    Send HTTP POST request to lead generation API.
+    Args:
+        call_sid: Twilio CallSid to include as query parameter.
+    """
+    lead_url = settings.LEAD_GENERATION_API_URL
+    lead_generation_url = f"{lead_url}/organizations/conversations/"
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.post(
+                lead_generation_url,
+                params={"call_sid": call_sid},
+                json={}  # Empty body to match cURL example
+            )
+            response.raise_for_status()
+            logger.info(f"Lead generation API called successfully for call_sid: {call_sid}")
+        except httpx.HTTPStatusError as e:
+            error_detail = e.response.json() if e.response.content else str(e)
+            logger.error(f"Lead generation API failed for call_sid: {call_sid}, status: {e.response.status_code}, detail: {error_detail}")
+            # Don't raise exception in background task; log instead
+        except httpx.RequestError as e:
+            logger.error(f"Network error calling lead generation API for call_sid: {call_sid}: {str(e)}")
+
 
 
 
